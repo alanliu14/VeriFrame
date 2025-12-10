@@ -1,0 +1,10 @@
+AI视频检测技术情报简报
+研究网站
+(1) 在 arXiv, GitHub, Hugging Face 上搜索 2024年6月至2025年12月间发布的关于“Video Forgery Detection”、“Diffusion Generated Video Detection”和“GenAI Video Detection”的论文与开源项目，筛选不依赖元数据或水印的盲检方案，并寻找附带官方代码（Official Implementation）的 SOTA 项目。
+(2) 针对 DiT (Diffusion Transformer) 架构，具体查找利用 Video-MAE、CLIP 特征或频域分析 (Frequency Analysis) 进行检测的研究，特别是针对 OpenAI Sora 2, Google Veo 3, Runway Gen-4 的检测效果与代码实现。
+(3) 在中文互联网平台（知乎、CSDN、微信公众号）及 GitHub 中文区深度挖掘针对“可灵 (Kling 1.6/2.6)”、“海螺 (Minimax)”和“即梦 (Jimeng)”的视频检测实战经验、伪影分析或频域特征研究。
+(4) 搜集并对比 ONNX Runtime, TensorRT, OpenVINO 在移动端与云端部署视频分类模型的 Benchmark 数据，以评估针对 AI 视频检测模型的高效推理方案。
+(5) 搜索现有的 Python 视频 Deepfake 检测开源库，查找是否存在可以直接 `pip install` 的 API 或 SDK，以便快速集成到 TrueSight App 中。
+(6) 整理上述步骤中收集到的核心算法原理、模型架构、性能数据以及所有相关的真实 GitHub 项目链接和论文 URL，按照要求生成详细的情报简报。
+分析结果
+生成报告
