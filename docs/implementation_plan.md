@@ -10,7 +10,7 @@ The engine will integrate three distinct detection vectors to identify AI-genera
 
 ## User Review Required
 > [!IMPORTANT]
-> **Model Selection**: Defaulting to `dinov2_vits14` (Small) for speed. Since you have a 5090, we could switch to `dinov2_vitg14` (Giant) for maximum accuracy, but it's slower. **I have configured the code to easily switch backbones.**
+> **Model Selection**: Defaulting to `dinov2_vitg14` (Giant) for maximum accuracy on RTX 3070 Ti. **I have configured the code to easily switch backbones.**
 
 > [!NOTE]
 > **Dependency Management**: Will use `conda` or `venv`? Assuming standard `pip` + `venv` per previous steps.
@@ -57,6 +57,10 @@ class TrueSightEngine:
     - Compute cosine similarity between velocity vectors $v_t = z_{t+1} - z_t$.
     - High curvature (low cosine similarity avg) = AI.
 - **5090 Optimization**: Batch process all frames of a video at once instead of sequential loop.
+- **[NEW] Jitter Analysis (Variance)**:
+    - Instead of just Mean Curvature, we analyze the **Range (Max-Min)** of curvature angles.
+    - **Hypothesis**: AI videos have high semantic instability (High Range), Real videos are stable (Low Range).
+    - **Threshold**: Range > 0.757 = AI.
 
 #### B. Kling Conditional Leakage
 - **Target**: Kling AI (I2V mode).
@@ -65,6 +69,9 @@ class TrueSightEngine:
     - Compute `SSIM(frame_t, frame_{t+1})`.
     - Look for $\min(\Delta SSIM)$ (the "Drop").
     - Negative spikes < Threshold = AI.
+    > [!WARNING]
+    > **Vulnerability**: If user trims the first 1-2 seconds, this method fails.
+    > **Mitigation**: This is a "Fast Pass" check. If it fails (or video is trimmed), **ReStraV** (Method A) takes over as the primary detector, as Curvature artifacts persist throughout the video.
 
 #### C. rPPG (Remote Photoplethysmography)
 - **Target**: Jimeng / Virtual Humans / Face-swap.
@@ -96,3 +103,18 @@ Unit tests to verify the engine loads on 5090 and returns valid JSON structure.
 ### Manual Verification
 1. You will need to put 1 test video in `dataset/test/` and run the script.
 2. Verify GPU usage via Task Manager to ensure 5090 is actually being used (CUDA load).
+
+## Phase 6: Deep Research (Variance Analysis)
+- **Goal**: Address low separability (0.06 gap) of Mean Curvature.
+- **Method**: Implemented `debug_variance.py` to analyze frame-level jitter.
+- **Result**: Found `Curvature Range` to be a superior metric (Gap > 0.25).
+- **Integration**: Updated `truesight_engine.py` to use Range metric.
+
+## Phase 7: API & Deployment
+- **Goal**: Productize the engine.
+- **Stack**: FastAPI + Uvicorn + Docker.
+- **Status**:
+    - `api_server.py`: Created.
+    - `Dockerfile`: Created.
+    - **Endpoints**: `/health`, `/analyze`.
+3. **Robustness Test**: Manually trim a Kling video (remove first 3s) using ffmpeg, and verify `ReStraV` still flags it as AI.

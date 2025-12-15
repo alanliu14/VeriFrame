@@ -30,11 +30,17 @@ warnings.filterwarnings("ignore")
 class EngineConfig:
     """Configuration for TrueSight detection thresholds and parameters."""
 
-    # ReStraV: Latent curvature threshold (higher = more likely AI)
-    threshold_curvature: float = 0.25
+    # ReStraV: Latent curvature threshold
+    # NEW Logic: Curvature Range (Max - Min)
+    # Calibration: Real 0.63, AI 0.88. Threshold 0.757.
+    threshold_curvature_range: float = 0.757
 
-    # Kling: SSIM drop threshold (more negative = more likely AI)
-    threshold_ssim_drop: float = -0.05
+    # Keep legacy mean for backward compat or ensemble
+    threshold_curvature_mean: float = 1.856
+
+    # Kling: SSIM drop threshold
+    # Conservative setting
+    threshold_ssim_drop: float = -0.04
 
     # rPPG: Heart rate energy ratio threshold (lower = more likely AI)
     threshold_pulse_ratio: float = 0.04
@@ -45,7 +51,8 @@ class EngineConfig:
     sample_frames_rppg: int = 90      # Frames for rPPG (~3 seconds at 30fps)
 
     # DINOv2 model variant: "small", "base", "large", "giant"
-    dino_model_size: Literal["small", "base", "large", "giant"] = "small"
+    # Upgrading to GIANT for RTX 5090
+    dino_model_size: Literal["small", "base", "large", "giant"] = "giant"
 
     # Device selection
     device: str = field(default_factory=lambda: "cuda" if torch.cuda.is_available() else "cpu")
@@ -170,8 +177,13 @@ class TrueSightEngine:
         )
 
         # 1. ReStraV: Latent geometry analysis
-        curvature = self._check_restrav(video_path)
-        result.scores["curvature"] = curvature
+        curv_stats = self._check_restrav(video_path)
+        if isinstance(curv_stats, dict):
+            result.scores["curvature_mean"] = curv_stats["mean"]
+            result.scores["curvature_std"] = curv_stats["std"]
+            result.scores["curvature_range"] = curv_stats["range"]
+        else:
+            result.scores["curvature"] = curv_stats # Fallback
 
         # 2. Kling Leakage: SSIM drop detection
         ssim_drop, drop_frame = self._check_kling_leakage(video_path)
@@ -188,7 +200,7 @@ class TrueSightEngine:
 
         return result
 
-    def _check_restrav(self, video_path: str) -> float:
+    def _check_restrav(self, video_path: str) -> dict:
         """
         ReStraV: Detect AI via latent space trajectory curvature.
 
@@ -196,7 +208,7 @@ class TrueSightEngine:
         DINOv2's representation space compared to natural videos.
 
         Returns:
-            Average curvature score (higher = more likely AI)
+            Dict with 'mean', 'std', 'range' of curvature angles.
         """
         frames = self.video_loader.get_frames(
             video_path,
@@ -218,12 +230,13 @@ class TrueSightEngine:
 
         features = np.vstack(features)  # [T, D]
 
-        # Compute trajectory curvature
-        curvature = self._compute_trajectory_curvature(features)
+        # Compute trajectory curvature statistics
+        stats = self._compute_trajectory_curvature(features)
 
-        return float(curvature)
+        # Return dict of stats
+        return stats
 
-    def _compute_trajectory_curvature(self, features: np.ndarray) -> float:
+    def _compute_trajectory_curvature(self, features: np.ndarray) -> dict:
         """
         Compute curvature of trajectory in feature space.
 
@@ -250,7 +263,15 @@ class TrueSightEngine:
             angle = np.arccos(cos_theta)
             angles.append(angle)
 
-        return float(np.mean(angles)) if angles else 0.0
+        if not angles:
+            return 0.0, 0.0, 0.0
+
+        stats = {
+            "mean": float(np.mean(angles)),
+            "std": float(np.std(angles)),
+            "range": float(np.max(angles) - np.min(angles))
+        }
+        return stats
 
     def _check_kling_leakage(self, video_path: str) -> tuple[float, int]:
         """
@@ -334,14 +355,16 @@ class TrueSightEngine:
             result.confidence = 0.92
             return result
 
-        # Check 2: High latent curvature (DiT models)
-        curvature = scores.get("curvature", 0)
-        if curvature > self.config.threshold_curvature:
+        # Check 2: Latent Curvature Variance (Range)
+        # AI videos have erratic feature jumps (High Range)
+        curv_range = scores.get("curvature_range", 0)
+        
+        if curv_range > self.config.threshold_curvature_range:
             result.is_ai = True
-            result.primary_reason = "High_Latent_Curvature"
-            # Scale confidence based on how far above threshold
-            excess = curvature - self.config.threshold_curvature
-            result.confidence = min(0.95, 0.6 + excess * 1.5)
+            result.primary_reason = "High_Latent_Instability (Jitter)"
+            # Scale confidence: Threshold 0.9. If 1.3 -> High conf.
+            excess = curv_range - self.config.threshold_curvature_range
+            result.confidence = min(0.98, 0.7 + excess * 0.8)
             return result
 
         # Check 3: Low pulse ratio (AI faces)
@@ -357,8 +380,10 @@ class TrueSightEngine:
         result.is_ai = False
         result.primary_reason = "Passed_All_Checks"
         # Confidence in "real" based on how far from thresholds
-        curvature_margin = self.config.threshold_curvature - curvature
-        result.confidence = min(0.9, 0.5 + curvature_margin * 2)
+        # Confidence in "real" based on how far from thresholds
+        # Low range is better for Real.
+        range_margin = self.config.threshold_curvature_range - curv_range
+        result.confidence = min(0.9, 0.5 + range_margin * 2)
 
         return result
 
@@ -437,11 +462,11 @@ def main():
     valid_exts = ('.mp4', '.mov', '.avi', '.webm', '.mkv')
 
     if os.path.isdir(args.input):
-        video_paths = [
-            os.path.join(args.input, f)
-            for f in os.listdir(args.input)
-            if f.lower().endswith(valid_exts)
-        ]
+        video_paths = []
+        for root, dirs, files in os.walk(args.input):
+            for f in files:
+                if f.lower().endswith(valid_exts):
+                    video_paths.append(os.path.join(root, f))
     else:
         video_paths = [args.input]
 
