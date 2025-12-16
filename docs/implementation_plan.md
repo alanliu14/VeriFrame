@@ -110,6 +110,18 @@ Unit tests to verify the engine loads on 5090 and returns valid JSON structure.
 - **Result**: Found `Curvature Range` to be a superior metric (Gap > 0.25).
 - **Integration**: Updated `truesight_engine.py` to use Range metric.
 
+- **Objective**: Validate engine against high-consistency models (Sora 2, Kling 2.5, Veo 2).
+- **Finding**: Simple Jitter metrics **failed**. Real videos (tripod) overlap with Veo 3 (0.37 vs 0.44).
+- **New Strategy**: **Deep Learning Classifier**.
+    - We cannot reliably hand-craft a threshold.
+    - We must train a lightweight **MLP / Transformer Head** on top of DINOv2 features.
+    - **Input**: Sequence of DINOv2 embeddings ($T \times D$).
+    - **Output**: Probability of Real vs AI.
+- **Data Requirement**: **GenVideo-100K** (from "DeMamba" paper).
+    - **Scale**: ~100k videos.
+    - **Generators**: Sora, Kling, Gen-3, Pika, etc.
+    - **Source**: ModelScope.cn.
+
 ## Phase 7: API & Deployment
 - **Goal**: Productize the engine.
 - **Stack**: FastAPI + Uvicorn + Docker.
